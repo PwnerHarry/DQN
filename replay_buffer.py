@@ -1,6 +1,4 @@
-"""
-Copied from openai/baseline
-"""
+
 import numpy as np
 import random
 
