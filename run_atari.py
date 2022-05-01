@@ -1,16 +1,16 @@
-import time, warnings, argparse, scipy.io, gym, random, datetime, torch
-from utils import *
+import time, argparse, datetime
+from utils import get_env, evaluate_agent
 from DQN import DQN
 from components import FEATURE_EXTRACTOR, DQN_NETWORK
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 import os, psutil
 process = psutil.Process(os.getpid())
 
 parser = argparse.ArgumentParser(description='')
-parser.add_argument('--game', type=str, default='breakout', help='')
+parser.add_argument('--game', type=str, default='pacman', help='')
 parser.add_argument('--lr', type=float, default=0.0000625, help='')
 parser.add_argument('--gamma', type=float, default=0.99, help='')
-parser.add_argument('--steps', type=int, default=50000000, help='')
+parser.add_argument('--steps_total', type=int, default=50000000, help='')
 parser.add_argument('--episodes', type=int, default=50000000, help='')
 parser.add_argument('--method', type=str, default='DQN', help='')
 parser.add_argument('--freq_eval', type=int, default=500, help='')
@@ -29,20 +29,21 @@ seed = get_set_seed(args.seed, env)
 writer = SummaryWriter("%s/%s/%d" % (env.spec._env_name, args.method, seed))
 
 if args.method == 'DQN':
+    # TODO: change the interfaces after cleaning up the code
     feature_extractor = FEATURE_EXTRACTOR(shape_input=env.observation_space.shape)
     network = DQN_NETWORK(feature_extractor, num_actions=env.action_space.n)
     if args.cuda: network = network.cuda()
-    agent = DQN(env, network, steps_total=args.steps, prioritized_replay=bool(args.prioritized_replay), size_buffer=args.size_buffer, gamma=args.gamma, lr=args.lr, seed=seed)
+    agent = DQN(env, network, steps_total=args.steps_total, prioritized_replay=bool(args.prioritized_replay), size_buffer=args.size_buffer, gamma=args.gamma, lr=args.lr, seed=seed)
 
 step_elapsed, episode_elapsed = 0, 0
-agent, env, episode_elapsed, step_elapsed = load_checkpoint(args.path_checkpoint, agent, env, episode_elapsed, step_elapsed)
-
 return_cum, step_episode = 0, 0
+
 print('initialization completed')
+
 time_start, time_episode_start = time.time(), time.time()
-while step_elapsed <= args.steps and episode_elapsed <= args.episodes:
+while step_elapsed <= args.steps_total and episode_elapsed <= args.episodes:
     obs_curr, done = env.reset(), False
-    while not done and step_elapsed <= args.steps:
+    while not done and step_elapsed <= args.steps_total:
         if args.method == 'random':
             obs_next, reward, done, _ = env.step(env.action_space.sample()) # take a random action
         else:
@@ -67,15 +68,13 @@ while step_elapsed <= args.steps and episode_elapsed <= args.episodes:
             epsilon = agent.exploration.value(agent.t)
             fps_episode = 4.0 * step_episode / (time_episode_end - time_episode_start) # 4 frames per agent step
             fps_overall = 4.0 * step_elapsed / (time_episode_end - time_start)
-            eta = str(datetime.timedelta(seconds=int(4 * (args.steps - step_elapsed) / fps_overall)))
+            eta = str(datetime.timedelta(seconds=int(4 * (args.steps_total - step_elapsed) / fps_overall)))
             writer.add_scalar('Other/epsilon', epsilon, step_elapsed)
             writer.add_scalar('Other/fps_episode', fps_episode, step_elapsed)
             writer.add_scalar('Other/trans_buffer', len(agent.replay_buffer), step_elapsed)
             writer.add_scalar('Other/usage_memory', process.memory_info().rss / (1024 ** 2), step_elapsed)
             print('episode: %d, epsilon: %.2f, return: %.2f, steps: %d, fps_episode: %.2f, fps_overall: %.2f, eta: %s' % (episode_elapsed, epsilon, return_cum, step_episode, fps_episode, fps_overall, eta))
         return_cum, step_episode, time_episode_start = 0, 0, time.time()
-        if episode_elapsed % args.freq_checkpoint == 0:
-            save_checkpoint(env, agent, episode_elapsed)
     else:
         continue
 time_end = time.time()
