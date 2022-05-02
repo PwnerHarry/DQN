@@ -1,4 +1,4 @@
-import gym, imageio, torch, numpy as np, random
+import gym, torch, numpy as np, random
 from collections import deque
 from cpprb import PrioritizedReplayBuffer, ReplayBuffer
 from gym import spaces
@@ -55,7 +55,6 @@ class FrameStack(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         self.k = k
         self.frames = deque([], maxlen=k)
-        if self.gpu: self.frames_gpu = deque([], maxlen=k)
         shp = env.observation_space.shape
         self.observation_space = spaces.Box(low=0, high=255, shape=(shp[:-1] + (shp[-1] * k,)), dtype=env.observation_space.dtype)
 
@@ -127,29 +126,25 @@ class EpisodicLifeEnv(gym.Wrapper):
         self.lives = self.env.unwrapped.ale.lives()
         return obs
 
-def wrap_deepmind(env, size=(84, 84), grayscale=True, episode_life=True, frame_stack=True, gpu=False):
+def wrap_deepmind(env, size=(84, 84), grayscale=True, episode_life=True, frame_stack=True):
     height, width = size
     if episode_life: env = EpisodicLifeEnv(env)
     if 'FIRE' in env.unwrapped.get_action_meanings(): env = FireResetEnv(env)
     env = WarpFrame(env, width=width, height=height, grayscale=grayscale)
-    if frame_stack: env = FrameStack(env, 4, gpu=gpu)
+    if frame_stack: env = FrameStack(env, 4)
     return env
 
 class LazyFrames(object):
-    def __init__(self, frames, gpu=False):
+    def __init__(self, frames):
         """This object ensures that common frames between the observations are only stored once.
         It exists purely to optimize memory usage which can be huge for DQN's 1M frames replay buffers.
         This object should only be converted to numpy array before being passed to the model."""
         self._frames = frames
         self._out = None
-        self.gpu = gpu
 
     def _force(self):
         if self._out is None:
-            if self.gpu:
-                return torch.cat(self._frames, dim=-1)
-            else:
-                return np.concatenate(self._frames, axis=-1)
+            return np.concatenate(self._frames, axis=-1)
         else:
             return self._out
 
@@ -159,20 +154,16 @@ class LazyFrames(object):
             out = out.astype(dtype)
         return out
 
-def obs2tensor(obs, divide=None, dtype=torch.float32):
-    # TODO: this function needs cleaning up
-    if isinstance(obs, LazyFrames): # lazyframes (tf.tensor)
+def atariobs2tensor(obs, divide=255, device=torch.device("cuda" if torch.cuda.is_available() else "cpu")):
+    if isinstance(obs, LazyFrames):
         obs = obs._force()
-    if isinstance(obs, torch.tensor):
-        tensor = obs
-        if len(tensor.shape) == 1 or len(tensor.shape) == 3: tensor = tf.expand_dims(tensor, 0)
-    else: # numpy or lazyframes (np.array)
-        obs_processed = process_obs(obs)
-        tensor = tf.constant(obs_processed)
-        del obs_processed
-    if divide is not None:
-        tensor = tf.math.divide(tensor, divide)
-    tensor = tf.dtypes.cast(tensor, dtype)
+    if isinstance(obs, np.ndarray):
+        if len(obs.shape) == 1 or len(obs.shape) == 3:
+            obs = np.expand_dims(obs, 0)
+    if divide is None:
+        tensor = torch.tensor(obs, device=device, dtype=torch.float32).permute(0, 3, 1, 2)
+    else:
+        tensor = torch.tensor(obs, device=device).permute(0, 3, 1, 2) / 255
     return tensor
 
 class LinearSchedule(object):
@@ -187,10 +178,17 @@ class LinearSchedule(object):
 
 def get_cpprb(env, size_buffer, prioritized=False):
     env_dict = get_cpprb_env_dict(env)
-    if prioritized:
-        return PrioritizedReplayBuffer(size_buffer, env_dict, next_of=("obs"))
+    if 'atari' in env.spec.entry_point:
+        if prioritized:
+            return PrioritizedReplayBuffer(size_buffer, env_dict, next_of=("obs"), stack_compress="obs")
+        else:
+            return ReplayBuffer(size_buffer, env_dict, next_of=("obs"), stack_compress="obs")
     else:
-        return ReplayBuffer(size_buffer, env_dict, next_of=("obs"))
+        if prioritized:
+            return PrioritizedReplayBuffer(size_buffer, env_dict, next_of=("obs"))
+        else:
+            return ReplayBuffer(size_buffer, env_dict, next_of=("obs"))
+    
 
 def get_space_size(space):
         if isinstance(space, gym.spaces.box.Box):
@@ -214,25 +212,22 @@ def get_cpprb_env_dict(env):
     env_dict = {"obs": {"shape": shape_obs}, "act": {}, "rew": {"shape": 1}, "done": {}} # "dtype", np.bool
     if isinstance(env.action_space, gym.spaces.discrete.Discrete):
         env_dict["act"]["shape"] = 1
-        env_dict["act"]["dtype"] = np.int32
+        env_dict["act"]["dtype"] = np.uint8
     elif isinstance(env.action_space, gym.spaces.box.Box):
         env_dict["act"]["shape"] = env.action_space.shape
         env_dict["act"]["dtype"] = np.float32
     obs = env.reset()
     if isinstance(obs, np.ndarray):
         env_dict["obs"]["dtype"] = obs.dtype
+    elif isinstance(obs, LazyFrames):
+        env_dict["obs"]["dtype"] = obs._frames[0].dtype
     return env_dict
 
-def evaluate_agent(env, agent, seed, num_episodes=5, render=False):
+def evaluate_agent(env, agent, num_episodes=5):
     return_cum, episode, returns = 0, 0, []
-    if render:
-        pass
-        filename = '%s_%d_%d.mp4' % (env.spec._env_name, seed, agent.t)
-        video = imageio.get_writer(filename, fps=30)
     while episode < num_episodes:
         obs_curr, done = env.reset(), False
         while not done:
-            if render: video.append_data(env.render(mode='rgb_array'))
             action = agent.decide(obs_curr, eval=True)
             obs_next, reward, done, _ = env.step(action) # take a computed action
             return_cum += reward
@@ -257,7 +252,7 @@ def filter_nickname(name_env):
     return name_env
 
 def get_env(name_env):
-    env = wrap_deepmind(gym.make(name_env), episode_life=True, clip_rewards=False, frame_stack=True, scale=False)
+    env = wrap_deepmind(gym.make(name_env), episode_life=True, frame_stack=True)
     env.spec.max_episode_steps = 27000 # 108K frames cap
     return env
 
@@ -281,3 +276,15 @@ def get_set_device():
         device = torch.device("cpu")
         torch.set_default_tensor_type(torch.FloatTensor)
     return device, flag_cuda
+
+@torch.no_grad()
+def init_weights(architecture):
+    for layer in architecture:
+        if type(layer) == torch.nn.Conv2d:
+            torch.nn.init.kaiming_uniform_(layer.weight, nonlinearity='relu')
+        elif type(layer) == torch.nn.Linear:
+            torch.nn.init.xavier_normal_(layer.weight)
+            torch.nn.init.uniform_(layer.bias, -np.sqrt(1.0 / layer.in_features), np.sqrt(1.0 / layer.in_features))
+        elif type(layer) == torch.nn.Conv1d:
+            torch.nn.init.xavier_normal_(layer.weight)
+            torch.nn.init.uniform_(layer.bias, -np.sqrt(1.0 / layer.in_channels), np.sqrt(1.0 / layer.in_channels))

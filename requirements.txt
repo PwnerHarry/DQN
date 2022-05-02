@@ -1,7 +1,8 @@
 cpprb
 tensorboardX
-gym
+gym[accept-rom-license]
 torch
 torchvision
 torchaudio
 opencv-python
+ale-py
