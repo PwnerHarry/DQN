@@ -74,17 +74,17 @@ while step_elapsed <= args.steps_total and episode_elapsed <= args.episodes:
         step_elapsed += step_episode
         episode_elapsed += 1
         if args.method == 'random':
-            print('episode: %d, return: %.2f, steps: %d, fps_episode: %.2f, fps_overall: %.2f' % (episode_elapsed, return_cum, step_episode, step_episode / (time_episode_end - time_episode_start), step_elapsed / (time_episode_end - time_start)))
+            print('episode: %d, return: %.2f, steps: %d, sps_episode: %.2f, sps_overall: %.2f' % (episode_elapsed, return_cum, step_episode, step_episode / (time_episode_end - time_episode_start), step_elapsed / (time_episode_end - time_start)))
         elif args.method == 'DQN':
             epsilon = agent.schedule_epsilon.value(agent.t)
-            fps_episode = 4.0 * step_episode / (time_episode_end - time_episode_start) # 4 frames per agent step
-            fps_overall = 4.0 * step_elapsed / (time_episode_end - time_start)
-            eta = str(datetime.timedelta(seconds=int(4 * (args.steps_total - step_elapsed) / fps_overall)))
+            sps_episode = step_episode / (time_episode_end - time_episode_start) # 4 frames per agent step
+            sps_overall = step_elapsed / (time_episode_end - time_start)
+            eta = str(datetime.timedelta(seconds=int(4 * (args.steps_total - step_elapsed) / sps_overall)))
             writer.add_scalar('Other/epsilon', epsilon, step_elapsed)
-            writer.add_scalar('Other/fps_episode', fps_episode, step_elapsed)
+            writer.add_scalar('Other/sps_episode', sps_episode, step_elapsed)
             writer.add_scalar('Other/transitions_stored', agent.replay_buffer.get_stored_size(), step_elapsed)
             writer.add_scalar('Other/usage_memory', process.memory_info().rss / (1024 ** 2), step_elapsed)
-            print('episode: %d, epsilon: %.2f, return: %.2f, steps: %d, fps_episode: %.2f, fps_overall: %.2f, eta: %s' % (episode_elapsed, epsilon, return_cum, step_episode, fps_episode, fps_overall, eta))
+            print('episode: %d, epsilon: %.2f, return: %.2f, steps: %d, sps_episode: %.2f, sps_overall: %.2f, eta: %s' % (episode_elapsed, epsilon, return_cum, step_episode, sps_episode, sps_overall, eta))
         return_cum, step_episode, time_episode_start = 0, 0, time.time()
     else:
         continue
