@@ -2,8 +2,6 @@ import torch, numpy as np, copy, random
 from components import *
 from utils import get_cpprb, LinearSchedule, atariobs2tensor
 
-# TODO: decouple the agent into 2-levels
-
 class DQN_BASE(RL_AGENT):
     def __init__(self,
         env, 
@@ -54,11 +52,12 @@ class DQN_BASE(RL_AGENT):
 
     @torch.no_grad()
     def process_batch(self, batch, prioritized=False):
+        # even with prioritized replay, one would still want to process a batch without the priorities
         if prioritized:
-            (batch_obs_curr, batch_action, batch_reward, batch_done, batch_obs_next, weights, batch_idxes) = batch.values()
+            batch_obs_curr, batch_action, batch_reward, batch_done, batch_obs_next, weights, batch_idxes = batch.values()
             weights = torch.tensor(weights, dtype=torch.float32, device=self.device).reshape(-1, 1)
         else:
-            (batch_obs_curr, batch_action, batch_reward, batch_done, batch_obs_next) = batch.values()
+            batch_obs_curr, batch_action, batch_reward, batch_done, batch_obs_next = batch.values()
             weights, batch_idxes = None, None
 
         batch_reward = torch.tensor(batch_reward, dtype=torch.float32, device=self.device).reshape(-1, 1)
@@ -66,7 +65,7 @@ class DQN_BASE(RL_AGENT):
         batch_action = torch.tensor(batch_action, dtype=torch.int64, device=self.device).reshape(-1, 1)
 
         batch_obs_curr, batch_obs_next = self.obs2tensor(batch_obs_curr, device=self.device), self.obs2tensor(batch_obs_next, device=self.device)
-        if self.clip_reward:
+        if self.clip_reward: # this is a DQN-specific thing
             batch_reward = torch.sign(batch_reward)
         return (batch_obs_curr, batch_action, batch_reward, batch_obs_next, batch_done, weights, batch_idxes)
 
