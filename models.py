@@ -6,7 +6,7 @@ class DQN_BASE(RL_AGENT):
     def __init__(self,
         env, 
         network_policy,
-        gamma=0.99,
+        gamma=0.99, clip_reward=True,
         exploration_fraction=0.02, epsilon_final_train=0.01, epsilon_eval=0.001, steps_total=50000000,
         size_buffer=1000000, prioritized_replay=True,
         func_obs2tensor=atariobs2tensor,
@@ -15,8 +15,8 @@ class DQN_BASE(RL_AGENT):
         ):
 
         super(DQN_BASE, self).__init__(env, gamma, seed)
-        
-        # self.create_replay_buffer(prioritized_replay, prioritized_replay_eps, size_buffer, alpha_prioritized_replay, prioritized_replay_beta0, prioritized_replay_beta_iters, steps_total)
+
+        self.clip_reward = clip_reward        
         self.schedule_epsilon = LinearSchedule(schedule_timesteps=int(exploration_fraction * steps_total), initial_p=1.0, final_p=epsilon_final_train)
         self.epsilon_eval = epsilon_eval
         
@@ -112,7 +112,7 @@ class DQN(DQN_BASE):
         super(DQN, self).__init__(
             env, 
             network_policy,
-            gamma=gamma,
+            gamma=gamma, clip_reward=clip_reward,
             exploration_fraction=exploration_fraction, epsilon_final_train=epsilon_final_train, epsilon_eval=epsilon_eval, steps_total=steps_total,
             size_buffer=size_buffer, prioritized_replay=prioritized_replay,
             func_obs2tensor=func_obs2tensor,
@@ -128,7 +128,6 @@ class DQN(DQN_BASE):
             param.requires_grad = False
         self.network_target.eval()
 
-        self.clip_reward = clip_reward
         self.size_batch = size_batch
         self.time_learning_starts = time_learning_starts
         self.freq_train = freq_train
