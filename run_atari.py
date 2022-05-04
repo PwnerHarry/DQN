@@ -79,7 +79,7 @@ while step_elapsed <= args.steps_total and episode_elapsed <= args.episodes:
             epsilon = agent.schedule_epsilon.value(agent.t)
             sps_episode = step_episode / (time_episode_end - time_episode_start) # 4 frames per agent step
             sps_overall = step_elapsed / (time_episode_end - time_start)
-            eta = str(datetime.timedelta(seconds=int(4 * (args.steps_total - step_elapsed) / sps_overall)))
+            eta = str(datetime.timedelta(seconds=int((args.steps_total - step_elapsed) / sps_overall)))
             writer.add_scalar('Other/epsilon', epsilon, step_elapsed)
             writer.add_scalar('Other/sps_episode', sps_episode, step_elapsed)
             writer.add_scalar('Other/transitions_stored', agent.replay_buffer.get_stored_size(), step_elapsed)
